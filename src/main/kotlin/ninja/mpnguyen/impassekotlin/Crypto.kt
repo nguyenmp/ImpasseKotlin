@@ -9,13 +9,9 @@ import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
-class Folder {
-}
-
-class Value {
-}
-
 class FileRepresentation {
+    class VersionMismatchException(message: String) : Exception(message)
+
     val version : String
 
     val encryption_salt_encoded : String
@@ -49,7 +45,8 @@ class FileRepresentation {
         // Generate some nice random bits for the salt
         val encryption_salt = ByteArray(512)
         random.nextBytes(encryption_salt)
-        encryption_salt_encoded = base64_encoder.encodeToString(encryption_salt)
+        encryption_salt_encoded = base64_encoder
+                .encodeToString(encryption_salt)
 
         // Generate some nice random bits for the salt
         val hmac_salt = ByteArray(256)
@@ -73,19 +70,32 @@ class FileRepresentation {
         database_hmac_encoded = base64_encoder.encodeToString(database_hmac)
     }
 
-    fun cipher(mode : Int, input : ByteArray, password : CharArray, salt : ByteArray, iv : ByteArray) : ByteArray {
+    fun cipher(
+            mode : Int,
+            input : ByteArray,
+            password : CharArray,
+            salt : ByteArray,
+            iv : ByteArray
+    ) : ByteArray {
         val encryption_key_spec = PBEKeySpec(password, salt, 100000, 128)
         val encryption_key = SecretKeyFactory
                 .getInstance("PBKDF2WithHmacSHA512")
                 .generateSecret(encryption_key_spec)
-        val encryption_secret_key_spec = SecretKeySpec(encryption_key.encoded, "AES")
+        val encryption_secret_key_spec = SecretKeySpec(
+                encryption_key.encoded,
+                "AES"
+        )
         val encryption_iv_spec = IvParameterSpec(iv)
         val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
         cipher.init(mode, encryption_secret_key_spec, encryption_iv_spec)
         return cipher.doFinal(input)
     }
 
-    fun hmac(password : CharArray, salt : ByteArray, input : ByteArray) : ByteArray {
+    fun hmac(
+            password : CharArray,
+            salt : ByteArray,
+            input : ByteArray
+    ) : ByteArray {
         val hmac_algorithm = "HmacSHA512"
         val hmac_machine = Mac.getInstance(hmac_algorithm)
         val hmac_spec = PBEKeySpec(password, salt, 100000, 512)
@@ -99,12 +109,17 @@ class FileRepresentation {
 
     fun open(password: CharArray) : KeyValueStore {
         // Unencode all the datum to get the bytes
+        if (version == "0.0") {
+            throw VersionMismatchException("We cannot open version " + version)
+        }
         val base64_decoder = Base64.getDecoder()
         val encryption_salt = base64_decoder.decode(encryption_salt_encoded)
         val hmac_salt = base64_decoder.decode(hmac_salt_encoded)
         val database_hmac = base64_decoder.decode(database_hmac_encoded)
-        val database_encryption_iv = base64_decoder.decode(database_encryption_iv_encoded)
-        val database_encrypted = base64_decoder.decode(database_encrypted_encoded)
+        val database_encryption_iv = base64_decoder
+                .decode(database_encryption_iv_encoded)
+        val database_encrypted = base64_decoder
+                .decode(database_encrypted_encoded)
 
 
         // Authenticate the database first
@@ -114,11 +129,20 @@ class FileRepresentation {
         }
 
         // Decrypt the database after it's been authenticated
-        val database_bytes = cipher(Cipher.DECRYPT_MODE, database_encrypted, password, encryption_salt, database_encryption_iv)
+        val database_bytes = cipher(
+                Cipher.DECRYPT_MODE,
+                database_encrypted,
+                password,
+                encryption_salt,
+                database_encryption_iv
+        )
         return KeyValueStore(database_bytes)
     }
 
-    private fun equals(derived_hmac: ByteArray, database_hmac: ByteArray) : Boolean {
+    private fun equals(
+            derived_hmac: ByteArray,
+            database_hmac: ByteArray
+    ) : Boolean {
         if (derived_hmac.size != database_hmac.size) {
             return false
         }
@@ -128,22 +152,5 @@ class FileRepresentation {
                 val other = database_hmac[index]
                 return ours == other
         }.all { it }
-    }
-}
-
-
-class KeyValueStore {
-    var value : String = ""
-
-    constructor() {
-        value = "Hello World"
-    }
-
-    constructor(bytes : ByteArray) {
-        value = String(bytes, Charsets.UTF_8)
-    }
-
-    fun toBytes() : ByteArray {
-        return value.toByteArray(Charsets.UTF_8)
     }
 }
